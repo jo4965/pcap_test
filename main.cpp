@@ -1,16 +1,15 @@
-#include <sys/time.h>
 #include <pcap.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <arpa/inet.h>
-
+#include <netinet/udp.h>
+#include <net/if_arp.h>
 void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
                 const u_char *packet);
 
 void chtoMac(const u_char * mac);
-
 
 int main(void)
 {
@@ -87,8 +86,10 @@ void chtoMac(const u_char * mac) // change mac address from byte_array to AA:BB:
 }
 
 struct ip* iph;
-
 struct tcphdr* tcph;
+struct udphdr * udph;
+struct arphdr * arph ;
+
 
 void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
                 const u_char *packet)
@@ -135,6 +136,9 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
     myoff.ether_type = 12;
     myoff.ether_size = 14;
 
+    printf("PACKET CAPTURED\n");
+
+
     printf("Src MAC Address : ");
     chtoMac((packet + myoff.mac_src));
     printf("Dst MAC Address : ");
@@ -166,30 +170,61 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
             myoff.sport = myoff.ip_size * 4 + myoff.ether_size;
             myoff.dport = myoff.ip_size * 4 + myoff.ether_size + 2;
 
+            printf("with TCP\n");
             printf("Src Port : %d\n" , ntohs(*(uint16_t *)(packet + myoff.sport)));
             printf("Dst Port : %d\n" , ntohs(*(uint16_t *)(packet + myoff.dport)));
             printf("\n");
         }
-
-        // Print all the byte array.
-        printf("The size of the packet : %d ", length);
-        printf("bytes\n");
-
-        while(length--)
+        // In case : UDP
+        else if(IP_type == 0x11)
         {
-            printf("%02x ", *(packet++));
-            if ((++chcnt % 16) == 0)
-                printf("\n");
+            udph = (struct udphdr *)(packet + myoff.ether_size);
+            printf("with UDP\n");
+
+            printf("Src Port : %d\n" , ntohs((udph->uh_sport)));
+            printf("Dst Port : %d\n" , ntohs((udph->uh_dport)));
+            printf("\n");
         }
+        else if(IP_type == 0x01)
+            printf("with ICMP\n");
+        else if(IP_type == 0x02)
+            printf("with IGMP\n");
+        else
+            printf("Unknown Packet");
+
     }
     // In case : ARP
     else if(ether_type == 0x0806)
     {
+        arph = (struct arphdr *) (packet + myoff.ether_size);
+
+        if(arph -> ar_op == 0x0001)
+            printf("ARP Request\n");
+        else
+            printf("ARP Reply\n");
 
     }
+    // The other cases :
     else
     {
-        printf("NONE IP Packet\n");
+        printf("Unknown Frame\n");
     }
+
+    // Print all the byte array.
+    printf("The size of the packet : %d ", length);
+    printf("bytes\n");
+
+
+    printf("Raw Data :\n");
+
+    chcnt = 0;
+    while(length--)
+    {
+        printf("%02x ", *(packet++));
+        if ((++chcnt % 16) == 0)
+            printf("\n");
+    }
+
+    printf("\n==============================================\n");
     printf("\n\n");
 }
