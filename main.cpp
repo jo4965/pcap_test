@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <net/ethernet.h>
 #include <netinet/udp.h>
 #include <net/if_arp.h>
 void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
@@ -85,10 +86,43 @@ void chtoMac(const u_char * mac) // change mac address from byte_array to AA:BB:
 
 }
 
+
+/*
+     I wrote down codes with naive methods using my own offset structures(following one).
+     The variables contain offsets from the beginning of the frame.
+*/
+struct MY_OFFSET{
+    unsigned int mac_src, mac_dst;
+    unsigned int ether_size;
+    unsigned int ether_type;
+    unsigned int ip_src, ip_dst;
+    unsigned int ip_size;
+    unsigned int dport, sport;
+};
+
+/*
+    For approaching data which is less than 1 byte like 4bit,
+    following MY_OFFSET_BIT structure is needed.
+*/
+struct MY_OFFSET_BIT{
+    #if __BYTE_ORDER == __LITTLE_ENDIAN
+        unsigned int ihl:4;       /* header length */
+        unsigned int version:4;        /* version */
+    #endif
+    #if __BYTE_ORDER == __BIG_ENDIAN
+        unsigned int version:4;        /* version */
+        unsigned int ihl:4;       /* header length */
+    #endif
+};
+
+
+
+
 struct ip* iph;
 struct tcphdr* tcph;
 struct udphdr * udph;
-struct arphdr * arph ;
+struct arphdr * arph;
+struct MY_OFFSET myoff = {6, 0, 14, 12, 14 + 12, 14 + 16, 0, 0, 0};
 
 
 void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
@@ -100,41 +134,6 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
     int chcnt;
     int length= pkthdr->len;
 
-    /*
-         I wrote down codes with naive methods using my own offset structures(following one).
-         The variables contain offsets from the beginning of the frame.
-    */
-    struct MY_OFFSET{
-        unsigned int mac_src, mac_dst;
-        unsigned int ether_size;
-        unsigned int ether_type;
-        unsigned int ip_src, ip_dst;
-        unsigned int ip_size;
-        unsigned int dport, sport;
-    };
-
-    /*
-        For approaching data which is less than 1 byte like 4bit,
-        following MY_OFFSET_BIT structure is needed.
-    */
-    struct MY_OFFSET_BIT{
-        #if __BYTE_ORDER == __LITTLE_ENDIAN
-            unsigned int ihl:4;       /* header length */
-            unsigned int version:4;        /* version */
-        #endif
-        #if __BYTE_ORDER == __BIG_ENDIAN
-            unsigned int version:4;        /* version */
-            unsigned int ihl:4;       /* header length */
-        #endif
-    };
-
-
-    struct MY_OFFSET myoff;
-    //myoff ethernet initialize
-    myoff.mac_src = 6;
-    myoff.mac_dst = 0;
-    myoff.ether_type = 12;
-    myoff.ether_size = 14;
 
     printf("PACKET CAPTURED\n");
 
@@ -150,19 +149,17 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
     ether_type = ntohs(*(uint16_t *)(packet + myoff.ether_type));
 
     // In case : IP
-    if (ether_type == 0x0800)
+    if (ether_type == ETHERTYPE_IP)
     {
         //myoff IP initialize
         printf("This is IP Packet\n");
-        myoff.ip_src = myoff.ether_size + 12;
-        myoff.ip_dst = myoff.ether_size + 16;
         printf("Src IP Address : %s\n", inet_ntoa(*(struct in_addr *)(packet + myoff.ip_src)));
         printf("Dst IP Address : %s\n", inet_ntoa(*(struct in_addr *)(packet + myoff.ip_dst)));
         printf("\n");
 
         // In case : TCP
         IP_type = *(u_char *)(packet + myoff.ether_size + 9);
-        if (IP_type == 0x06)
+        if (IP_type == IPPROTO_TCP)
         {
             //myoff TCP initialize
             //I used myoffbit structure for less than 1 byte pointer shifting.
@@ -176,7 +173,7 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
             printf("\n");
         }
         // In case : UDP
-        else if(IP_type == 0x11)
+        else if(IP_type == IPPROTO_UDP)
         {
             udph = (struct udphdr *)(packet + myoff.ether_size);
             printf("with UDP\n");
@@ -185,16 +182,16 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr,
             printf("Dst Port : %d\n" , ntohs((udph->uh_dport)));
             printf("\n");
         }
-        else if(IP_type == 0x01)
+        else if(IP_type == IPPROTO_ICMP)
             printf("with ICMP\n");
-        else if(IP_type == 0x02)
+        else if(IP_type == IPPROTO_IGMP)
             printf("with IGMP\n");
         else
             printf("Unknown Packet");
 
     }
     // In case : ARP
-    else if(ether_type == 0x0806)
+    else if(ether_type == ETHERTYPE_ARP)
     {
         arph = (struct arphdr *) (packet + myoff.ether_size);
 
